@@ -24,6 +24,26 @@ from srpy_common import log_info, log_debug, log_warn, SrpyShutdown, SrpyNoPacke
 class Router(object):
     def __init__(self, net):
         self.net = net
+        #part 2: building forwarding table
+        #forwarding_table = []
+        fwd = []
+        my_intfs = []
+        #neighbors = [] #seperate for now to use in packet ARP replies
+        for intf in self.net.interfaces(): #getting immediate neighbor info
+            #forwarding_table = forwarding_table + [(intf.ipaddr, intf.netmask, intf.ipaddr, intf.name)]
+            my_intfs.append([(intf.ipaddr, intf.netmask, intf.ipaddr, intf.name)])
+        f = open('forwarding_table.txt', 'r') #getting not immediate neighbors from file
+        for line in f:
+            info = f.split()
+            interface = (info[3].split('-'))[1] #get the 'eth0' out of 'router-eth0'
+            #forwarding_table = forwarding_table + [(info[0], info[1], info[2], interface)]
+            fwd = fwd + [(info[0], info[1], info[2], interface)]
+            #in format of (network prefix, network mask, next hop IP, interface name)
+        f.close()
+        #self.forwarding_table = forwarding_table
+        self.fwd = fwd
+        self.my_intfs = my_intfs
+        self.forwarding_table = my_intfs + fwd  
 
     def router_main(self):    
         while True:
@@ -33,47 +53,47 @@ class Router(object):
                 # log_debug("Timeout waiting for packets")
                 continue
             except SrpyShutdown:
-                return
-            #part 2: building forwarding table
-            forwarding_table = []
-            neighbors = [] #seperate for now to use in packet ARP replies
-            for intf in self.net.interfaces(): #getting immediate neighbor info
-                neighbors = neighbors + [(intf.ipaddr, intf.netmask, intf.ipaddr, intf.name)]
-            with open('forwarding_table.txt') as f: #getting not immediate neighbors from file
-                for line in f:
-                    info = f.split()
-                    interface = (info[3].split('-'))[1] #get the 'eth0' out of 'router-eth0'
-                    forwarding_table = forwarding_table + [(info[0], info[1], info[2], interface)]
-                    #in format of (network prefix, network mask, next hop IP, interface name)
-            forwarding_table = neighbors + forwarding_table            
+                return          
             #part 2: forwarding packets and making ARP_request to obtain MAC address
             if pkt.type == pkt.IP_TYPE: #!!!!if just a packet to be forwarded.  Not sure about this...
                 destIP = (pkt.dstip).toUnsigned()
-                tuple_num = 100 #a number clearly outside of boundaries
-                cidrlen = 100
+                #tuple_num = 100 #a number clearly outside of boundaries
+                matches = []
+                cidrlen = 0
                 for i in forwarding_table:  #!!!NEED TO DEAL WITH IF OWN IP/INTERFACE
-                    netmask = IPAddr(str(forwarding_table[i][1]))
+                    netmask = IPAddr(str(forwarding_table[i][1])).toUnsigned()
                     length = netmask_to_cidr(netmask)
-                    compare = int('1'*length + '0'*(32-length))
+                    #compare = int('1'*length + '0'*(32-length))
                     forwardIP = (forwarding_table[i][0]).toUnsigned()
-                    if((destIP & compare) == (forwardIP & compare)):
-                        if(length<cidrlen): #update so know looking at longest match
+                    if(forwardIP == (destIP & netmask))
+                        matches.append((length, forwarding_table[i][0], forwarding_table[i][2]))
+                    '''
+                    #if(destIP == (forwardIP & compare)):
+                        if(length>cidrlen): #update so know looking at longest match
                             tuple_num = i
                             cidrlen = length
-                if tuple_num = 100:  #no match was found
+                    '''
+                if len(matches)==0:
+                #if tuple_num = 100:  #no match was found
                     break
                 else:
                     #finding MAC address -> SENDING ARP_REQUEST
                     #!!!!! NOTE: NEED TO MAKE A QUEUE
+                    low = 0
+                    fIP = ''
+                    hop = ''
+                    for i in matches
+                        if(i[0]>low)
+                            fIP = i[1]
+                            hop = i[2]
                     arp_request = pktlib.arp()
                     arp_request.opcode = pkt.arp.REQUEST
                     arp_request.protosrc = pkt.srcip
-                    arp_request.protodst = forwarding_table[tuple_num][2] #next hop IP addr
+                    arp_request.protodst = hop #next hop IP addr
                     arp_request = hwsrc
                     ether = pktlib.ethernet()
                     ether.type = ether.ARP_TYPE
-                    ether.src
-                    ether.dst
+                    #ether.src = my MAC address
                     ether.set_payload(arp_request)
                     self.net.send_packet(dev, ether)
                     #sending packet... so this is if get ARP_reply....
