@@ -30,9 +30,7 @@ class Router(object):
 		#forwarding_table = []
 		fwd = []
 		my_intfs = []
-		#neighbors = [] #seperate for now to use in packet ARP replies
 		for intf in self.net.interfaces(): #getting immediate neighbor info
-			#forwarding_table = forwarding_table + [(intf.ipaddr, intf.netmask, intf.ipaddr, intf.name)]
 			my_intfs.append((intf.ipaddr, intf.netmask, IPAddr('0.0.0.0'), intf.name))
 		f = open('forwarding_table.txt', 'r') #getting not immediate neighbors from file
 		for line in f:
@@ -40,19 +38,9 @@ class Router(object):
 			interface = info[3]
 			interface = interface[:len(interface)-1] #get the 'eth0' out of 'router-eth0'
 			print interface
-			#forwarding_table = forwarding_table + [(info[0], info[1], info[2], interface)]
 			fwd = fwd + [(IPAddr(info[0]), IPAddr(info[1]), IPAddr(info[2]), interface)]
-			#in format of (network prefix, network mask, next hop IP, interface name)
 			fwd = fwd + [(IPAddr(info[2]), IPAddr('255.255.255.255'), IPAddr(info[2]), interface)]
-	   #     for entry in my_intfs:  #for the next hops - not immediately connected, not very far away
-	   #     	print 'FT mask: ' + str(IPAddr(entry[1]).toUnsigned()) + ', FT addr: ' + str(IPAddr(entry[0]).toUnsigned())
-	   #     	AND = ((entry[1].toUnsigned())&(entry[0].toUnsigned))
-	   #     	print 'the AND of that: ' + str(AND)
-	   #     	print 'Compare to ' + str(IPAddr(info[2]).toUnsigned())
-	   #     	if (((entry[1].toUnsigned()) & (entry[0].toUnsigned)) == (IPAddr(info[2].toUnsigned()))):
-	   #     		fwd = fwd + [(info[2]), (entry[1]), IPAddr(info[2]), entry[3]]
 		f.close()
-		#self.forwarding_table = forwarding_table
 
 		self.fwd = fwd
 		self.my_intfs = my_intfs
@@ -121,10 +109,10 @@ class Router(object):
 							self.macaddrs[nexthop] = arp.hwsrc
 							self.queue.remove(elem)
 							self.send_packet(elem[0],ippkt)
-						if arpcount==5:
+						if arpcount==4:
 							self.queue.remove(elem)
 							#timeout :(
-						if timenow-time_added-arpcount>=1:
+						if timenow-time_added-arpcount>=1: # if one or more seconds has elapsed since last sending an ARP request
 							self.send_arp_request(elem[0])
 							elem[3] = arpcount+1
 							
@@ -185,7 +173,7 @@ class Router(object):
 		ether.type = ether.ARP_TYPE
 		ether.src = intf.ethaddr
 		ether.dst = ETHER_BROADCAST
-		ether.set_payload(arp_pkt)
+		ether.payload = arp_pkt
 		self.net.send_packet(ifname, ether)
 	#isn't this so pretty?  Functions are our FRIENDS :)
 
@@ -205,7 +193,7 @@ class Router(object):
 		ether.type = ether.IP_TYPE
 		ether.src = intf.ethaddr
 		ether.dst = self.macaddrs[nexthop]
-		ether.set_payload(pkt)
+		ether.payload = pkt
 		self.net.send_packet(ifname, ether)
 
 def srpy_main(net):
