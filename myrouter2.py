@@ -42,6 +42,14 @@ class Router(object):
             #forwarding_table = forwarding_table + [(info[0], info[1], info[2], interface)]
             fwd = fwd + [(IPAddr(info[0]), IPAddr(info[1]), IPAddr(info[2]), interface)]
             #in format of (network prefix, network mask, next hop IP, interface name)
+            fwd = fwd + [(IPAddr(info[2]), IPAddr('255.255.255.255'), IPAddr(info[2]), interface)]
+       #     for entry in my_intfs:  #for the next hops - not immediately connected, not very far away
+       #     	print 'FT mask: ' + str(IPAddr(entry[1]).toUnsigned()) + ', FT addr: ' + str(IPAddr(entry[0]).toUnsigned())
+       #     	AND = ((entry[1].toUnsigned())&(entry[0].toUnsigned))
+       #     	print 'the AND of that: ' + str(AND)
+       #     	print 'Compare to ' + str(IPAddr(info[2]).toUnsigned())
+       #     	if (((entry[1].toUnsigned()) & (entry[0].toUnsigned)) == (IPAddr(info[2].toUnsigned()))):
+       #     		fwd = fwd + [(info[2]), (entry[1]), IPAddr(info[2]), entry[3]]
         f.close()
         #self.forwarding_table = forwarding_table
 
@@ -59,6 +67,7 @@ class Router(object):
             except SrpyShutdown:
                 return          
             #part 2: forwarding packets and making ARP_request to obtain MAC address
+            #debugger()
             if pkt.type == pkt.IP_TYPE: #!!!!if just a packet to be forwarded.  Not sure about this...
                 pkt = pkt.payload
                 destIP = pkt.dstip.toUnsigned()
@@ -77,27 +86,35 @@ class Router(object):
                     print 'pkt.dstip: ' + str(pkt.dstip) + ', the prefix in question: ' + str(i[0])
                     if((forwardIP & netmask) == (destIP & netmask)):
                         matches.append((length, i[0], i[2], i[3]))  #length, prefix, next hop, eth#
-                debugger()
                 if len(matches)==0:          #if tuple_num = 100:  #no match was found
                     print 'no match was found.\n'
                     continue
                 else:
+                    print ' got into else statement to send request packet'
                     #finding MAC address -> SENDING ARP_REQUEST
                     low = 0
                     match = ()
                     for i in matches:
                         if(i[0]>low):
                             match = i
-                    if(match[1]==pkt.dstip): #if next hop = prefix (which is how it is entered if one of own interfaces)
+                    if(match[2]==IPAddr('0.0.0.0')): #if next hop = prefix (which is how it is entered if one of own interfaces)
                         print 'This packet is for me!\n'
                         continue
                     else:	
+                        '''
+                        arp = pktlib.arp()
+                            arp.protodst = arp_request.protosrc
+                            arp.protosrc = intf.ipaddr
+                            arp.hwsrc = intf.ethaddr
+                            arp.hwdst = arp_request.hwsrc
+                            arp.opcode = pktlib.arp.REPLY
+                            '''
                         arp_request = pktlib.arp()
-                        arp_request.opcode = pktlib.arp.REQUEST
                         arp_request.protosrc = self.net.interface_by_name(match[3]).ipaddr
-                        arp_request.protodst = match[2] #next hop IP addr
-                        arp_request.src = self.net.interface_by_name(match[3]).ethaddr #my MAC 
-                        debugger()
+                        arp_request.protodst = match[1] #next hop IP addr
+                        arp_request.hwsrc = self.net.interface_by_name(match[3]).ethaddr #my MAC 
+                        arp_request.hwdst = ETHER_BROADCAST
+                        arp_request.opcode = pktlib.arp.REQUEST
                         ether = pktlib.ethernet()
                         ether.type = ether.ARP_TYPE
                         ether.src = self.net.interface_by_name(match[3]).ethaddr
@@ -106,14 +123,15 @@ class Router(object):
                         self.net.send_packet(match[3], ether)
                         #sending packet... so this is if get ARP_reply....
                         #make queue
-                        Queue.put([arp_request, pkt])
+                        self.queue.put([arp_request, pkt, match])
             #part 1: responding to ARP request
-            if pkt.type == pkt.ARP_TYPE:
+            #debugger()
+            elif pkt.type == pkt.ARP_TYPE:
                 arp = pkt.payload
                 if (arp.opcode == pktlib.arp.REPLY): #if it is a reply to own request
                     i = 0
-                    while (i<Queue.qsize()):
-                        arr = Queue.get()
+                    while (i<self.queue.qsize()):
+                        arr = self.queue.get()
                         oldreq = arr[0]
                         if (oldreq.protodst == arp.protosrc): #if right element in queue
                             old_pkt = arr[1]
@@ -122,11 +140,12 @@ class Router(object):
                             ether.type = ether.IP_TYPE
                             ether.src = old_pkt.srcip
                             ether.dst = arp.hwsrc
-                            pkt.protocol = pktlib.UDP_PROTOCOL
-                            self.net.send_packet(dev, ether)
+                            ether.payload = old_pkt
+                           #pkt.protocol = pkt.UDP_PROTOCOL
+                            self.net.send_packet(arr[2][3], ether)
                             break
                         else:								#if wrong element in queue, put back
-                            Queue.put(arr)
+                            self.queue.put(arr)
                         i = i+1;
                     print 'Did not find packet to respond to arp request.  :(\n'
                 else:
