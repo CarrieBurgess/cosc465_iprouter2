@@ -39,14 +39,12 @@ class Router(object):
 			info = line.split(' ')
 			interface = info[3]
 			interface = interface[:len(interface)-1] #get the \n out
-			print interface
 			fwd = fwd + [(IPAddr(info[0]), IPAddr(info[1]), IPAddr(info[2]), interface)]
 		f.close()
 
 		self.fwd = fwd
 		self.my_intfs = my_intfs
 		self.forwarding_table = my_intfs + fwd 
-		print self.forwarding_table
 		self.queue = [] #a list of tuples for storing ARP requested packets
 		self.macaddrs = {} #cache of {IP:addr} mappings to cut down ARP requests
 	def router_main(self):    
@@ -58,8 +56,7 @@ class Router(object):
 				# log_debug("Timeout waiting for packets")
 				continue
 			except SrpyShutdown:
-				return
-			print 'received packet ' + str(pkt.payload)      
+				return   
 			#part 2: forwarding packets and making ARP_request to obtain MAC address
 			if pkt.type == pkt.IP_TYPE: #!!!!if just a packet to be forwarded.  Not sure about this...
 				pkt = pkt.payload
@@ -103,21 +100,22 @@ class Router(object):
 							self.send_packet(elem[0],ippkt)	
 				else:
 					for intf in self.net.interfaces(): #if request from someone else/ need reply
-						if (intf.ipaddr==arp_request.protodst):
-						    arp = pktlib.arp()
-						    arp.protodst = arp_request.protosrc
-						    arp.protosrc = inf.ipaddr
-						    arp.hwsrc = intf.ethaddr
-						    arp.hwdst = arp_request.hwsrc
-						    arp.opcode = pktlib.arp.REPLY
-						    ether = pktlib.ethernet()
-						    ether.type = ether.ARP_TYPE
-						    ether.src = intf.ethaddr
-						    ether.dst = arp_request.hwsrc
-						    ether.set_payload(arp)
-						    self.net.send_packet(dev, ether)
-						    #self.net.send_packet(dev, arp_reply)
-						    break
+						if (intf.ipaddr==arp.protodst):
+							arp_request = arp
+							arp = pktlib.arp()
+							arp.protodst = arp_request.protosrc
+							arp.protosrc = inf.ipaddr
+							arp.hwsrc = intf.ethaddr
+							arp.hwdst = arp_request.hwsrc
+							arp.opcode = pktlib.arp.REPLY
+							ether = pktlib.ethernet()
+							ether.type = ether.ARP_TYPE
+							ether.src = intf.ethaddr
+							ether.dst = arp_request.hwsrc
+							ether.set_payload(arp)
+							self.net.send_packet(dev, ether)
+							#self.net.send_packet(dev, arp_reply)
+							break
 
 	#tup = (prefixlength, destIP, nexthop, ifname)
 	def send_arp_request(self, tup):
@@ -140,7 +138,6 @@ class Router(object):
 		ether.dst = ETHER_BROADCAST
 		ether.payload = arp_pkt
 		self.net.send_packet(ifname, ether)
-		print 'SENT ARP REQUEST FOR ' + str(ether.payload)
 	#isn't this so pretty?  Functions are our FRIENDS :)
 
 
@@ -164,7 +161,6 @@ class Router(object):
 
 	def check_queue_times(self):
 		timenow = floor(time())
-		print self.queue
 		for elem in self.queue:
 			time_added = elem[1]
 			arpcount = elem[3]
