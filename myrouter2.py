@@ -85,7 +85,7 @@ class Router(object):
 					#finding MAC address -> SENDING ARP_REQUEST
 					low = 0
 					match = ()
-					#debugger()
+					debugger()
 					print 'obtained matches; which one to choose?'
 					for i in matches:
 						if(i[0]>low):
@@ -206,6 +206,7 @@ class Router(object):
 		ether.payload = pkt
 		print 'sending packet on its merry way'
 		self.net.send_packet(ifname, ether)
+		
 
 def srpy_main(net):
 	'''
