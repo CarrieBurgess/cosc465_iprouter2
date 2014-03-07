@@ -74,7 +74,6 @@ class Router(object):
 					ifname = i[3]
 					if((forwardIP.toUnsigned() & netmask.toUnsigned()) == (destIP.toUnsigned() & netmask.toUnsigned())):
 						matches.append((length, destIP, nexthop, ifname))  #length, net_prefix, next hop, eth#
-				debugger()
 				if len(matches)!=0: #if we have at least one match 
 					#finding MAC address -> SENDING ARP_REQUEST
 					low = 0
