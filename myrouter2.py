@@ -31,7 +31,9 @@ class Router(object):
 		fwd = []
 		my_intfs = []
 		for intf in self.net.interfaces(): #getting immediate neighbor info
-			my_intfs.append((intf.ipaddr, intf.netmask, IPAddr('0.0.0.0'), intf.name))
+			my_intfs.append((intf.ipaddr, IPAddr('255.255.255.255'), IPAddr('0.0.0.0'), intf.name))
+			neighborIP = IPAddr(intf.netmask.toUnsigned()&intf.ipaddr.toUnsigned())
+			fwd.append((neighborIP,intf.netmask, neighborIP, intf.name))
 		f = open('forwarding_table.txt', 'r') #getting not immediate neighbors from file
 		for line in f:
 			info = line.split(' ')
@@ -39,12 +41,14 @@ class Router(object):
 			interface = interface[:len(interface)-1] #get the 'eth0' out of 'router-eth0'
 			print interface
 			fwd = fwd + [(IPAddr(info[0]), IPAddr(info[1]), IPAddr(info[2]), interface)]
-			fwd = fwd + [(IPAddr(info[2]), IPAddr('255.255.255.255'), IPAddr(info[2]), interface)]
+			#mask = self.net.interface_by_name(interface).netmask
+			#fwd = fwd + [(IPAddr(info[2]), mask, IPAddr(info[2]), interface)]
 		f.close()
 
 		self.fwd = fwd
 		self.my_intfs = my_intfs
 		self.forwarding_table = my_intfs + fwd 
+		print self.forwarding_table
 		self.queue = [] #a list of tuples for storing ARP requested packets
 		self.macaddrs = {} #cache of {IP:addr} mappings to cut down ARP requests
 	def router_main(self):    
@@ -63,7 +67,7 @@ class Router(object):
 				destIP = pkt.dstip
 				matches = []
 				cidrlen = 0
-				for i in self.forwarding_table:  #!!!NEED TO DEAL WITH IF OWN IP/INTERFACE
+				for i in self.forwarding_table:
 					netmask = i[1]
 					#(IPAddr(str(self.forwarding_table[i][1]))).toUnsigned()
 					length = netmask_to_cidr(netmask)
@@ -71,26 +75,31 @@ class Router(object):
 					forwardIP = i[0]
 					nexthop = i[2]
 					ifname = i[3]
-					print 'forward IP: ' + str(forwardIP) + ', Dest IP & mask: ' + str(IPAddr(destIP.toUnsigned() & netmask.toUnsigned()))
-					print 'pkt.dstip: ' + str(pkt.dstip) + ', the prefix in question: ' + str(forwardIP)
+					#print 'forward IP: ' + str(forwardIP) + ', Dest IP & mask: ' + str(IPAddr(destIP.toUnsigned() & netmask.toUnsigned()))
+					#print 'pkt.dstip: ' + str(pkt.dstip) + ', the prefix in question: ' + str(forwardIP)
 					if((forwardIP.toUnsigned() & netmask.toUnsigned()) == (destIP.toUnsigned() & netmask.toUnsigned())):
-						matches.append((length, forwardIP, nexthop, ifname))  #length, net_prefix, next hop, eth#
+						matches.append((length, destIP, nexthop, ifname))  #length, net_prefix, next hop, eth#
 
 				if len(matches)!=0: #if we have at least one match 
 					print ' got into else statement to send request packet'
 					#finding MAC address -> SENDING ARP_REQUEST
 					low = 0
 					match = ()
+					#debugger()
+					print 'obtained matches; which one to choose?'
 					for i in matches:
 						if(i[0]>low):
 							match = i
 					if match[2]==IPAddr('0.0.0.0'): #packet for us, drop it on the floor
 						continue;
-					if match[2] not in self.macaddrs:
+					if match[1] not in self.macaddrs:
+						print 'do i not have the mac addr?'
+						#debugger()
 						self.send_arp_request(match)
 						self.queue.append((match, floor(time()), pkt, 0))
 					else:
-						self.send_packet(match, pkt)
+					    print 'or do i have the mac addr and can send the packet?'
+					    self.send_packet(match, pkt)
 						
 			#part 1: responding to ARP request
 			#debugger()
@@ -105,8 +114,8 @@ class Router(object):
 						time_added = elem[1]
 						ippkt = elem[2]
 						arpcount = elem[3]
-						if(arp.protosrc == nexthop): #we found our guy
-							self.macaddrs[nexthop] = arp.hwsrc
+						if(arp.protosrc == pktdst): #we found our guy    ------------changed nexthop to pktdst
+							self.macaddrs[pktdst] = arp.hwsrc
 							self.queue.remove(elem)
 							self.send_packet(elem[0],ippkt)
 						if arpcount==4:
@@ -139,20 +148,20 @@ class Router(object):
 				else:
 					for intf in self.net.interfaces(): #if request from someone else/ need reply
 						if (intf.ipaddr==arp_request.protodst):
-							arp = pktlib.arp()
-							arp.protodst = arp_request.protosrc
-							arp.protosrc = intf.ipaddr
-							arp.hwsrc = intf.ethaddr
-							arp.hwdst = arp_request.hwsrc
-							arp.opcode = pktlib.arp.REPLY
-							ether = pktlib.ethernet()
-							ether.type = ether.ARP_TYPE
-							ether.src = intf.ethaddr
-							ether.dst = arp_request.hwsrc
-							ether.set_payload(arp)
-							self.net.send_packet(dev, ether)
-							#self.net.send_packet(dev, arp_reply)
-							break
+						    arp = pktlib.arp()
+						    arp.protodst = arp_request.protosrc
+						    arp.protosrc = inf.ipaddr
+						    arp.hwsrc = intf.ethaddr
+						    arp.hwdst = arp_request.hwsrc
+						    arp.opcode = pktlib.arp.REPLY
+						    ether = pktlib.ethernet()
+						    ether.type = ether.ARP_TYPE
+						    ether.src = intf.ethaddr
+						    ether.dst = arp_request.hwsrc
+						    ether.set_payload(arp)
+						    self.net.send_packet(dev, ether)
+						    #self.net.send_packet(dev, arp_reply)
+						    break
 
 	#tup = (prefixlength, destIP, nexthop, ifname)
 	def send_arp_request(self, tup):
@@ -164,7 +173,7 @@ class Router(object):
 	
 		arp_pkt = pktlib.arp()
 		arp_pkt.protosrc = intf.ipaddr #the ip address of the interface we're sending the request out
-		arp_pkt.protodst = nexthop 
+		arp_pkt.protodst = destIP 
 		arp_pkt.hwsrc = intf.ethaddr
 		arp_pkt.hwdst = ETHER_BROADCAST
 		arp_pkt.opcode = pktlib.arp.REQUEST
@@ -182,6 +191,7 @@ class Router(object):
 	#tup is a FT match tuple, like above
 	#tup = (prefixlength, destIP, nexthop, ifname)
 	def send_packet(self, tup, pkt):
+		print 'got here'
 		preflen = tup[0]
 		destIP = tup[1]
 		nexthop = tup[2]
@@ -192,8 +202,9 @@ class Router(object):
 		ether = pktlib.ethernet()
 		ether.type = ether.IP_TYPE
 		ether.src = intf.ethaddr
-		ether.dst = self.macaddrs[nexthop]
+		ether.dst = self.macaddrs[destIP]
 		ether.payload = pkt
+		print 'sending packet on its merry way'
 		self.net.send_packet(ifname, ether)
 
 def srpy_main(net):
