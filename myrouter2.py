@@ -38,11 +38,9 @@ class Router(object):
 		for line in f:
 			info = line.split(' ')
 			interface = info[3]
-			interface = interface[:len(interface)-1] #get the 'eth0' out of 'router-eth0'
+			interface = interface[:len(interface)-1] #get the \n out
 			print interface
 			fwd = fwd + [(IPAddr(info[0]), IPAddr(info[1]), IPAddr(info[2]), interface)]
-			#mask = self.net.interface_by_name(interface).netmask
-			#fwd = fwd + [(IPAddr(info[2]), mask, IPAddr(info[2]), interface)]
 		f.close()
 
 		self.fwd = fwd
@@ -60,7 +58,8 @@ class Router(object):
 				# log_debug("Timeout waiting for packets")
 				continue
 			except SrpyShutdown:
-				return      
+				return
+			print 'received packet ' + str(pkt.payload)      
 			#part 2: forwarding packets and making ARP_request to obtain MAC address
 			if pkt.type == pkt.IP_TYPE: #!!!!if just a packet to be forwarded.  Not sure about this...
 				pkt = pkt.payload
@@ -75,7 +74,7 @@ class Router(object):
 					ifname = i[3]
 					if((forwardIP.toUnsigned() & netmask.toUnsigned()) == (destIP.toUnsigned() & netmask.toUnsigned())):
 						matches.append((length, destIP, nexthop, ifname))  #length, net_prefix, next hop, eth#
-				
+				debugger()
 				if len(matches)!=0: #if we have at least one match 
 					#finding MAC address -> SENDING ARP_REQUEST
 					low = 0
@@ -87,7 +86,6 @@ class Router(object):
 					if match[2] in [str(x[2]) for x in self.my_intfs]: #packet for us, drop it on the floor
 						continue;
 					if match[2] not in self.macaddrs:
-						debugger()
 						self.queue.append([match, floor(time()), pkt, 0])
 						self.send_arp_request(match)
 					else:
@@ -103,8 +101,7 @@ class Router(object):
 						if(arp.protosrc == nexthop): #we found our guy    ------------changed nexthop to pktdst
 							self.macaddrs[nexthop] = arp.hwsrc
 							self.queue.remove(elem)
-							self.send_packet(elem[0],ippkt)
-							
+							self.send_packet(elem[0],ippkt)	
 				else:
 					for intf in self.net.interfaces(): #if request from someone else/ need reply
 						if (intf.ipaddr==arp_request.protodst):
@@ -144,6 +141,7 @@ class Router(object):
 		ether.dst = ETHER_BROADCAST
 		ether.payload = arp_pkt
 		self.net.send_packet(ifname, ether)
+		print 'SENT ARP REQUEST FOR ' + str(ether.payload)
 	#isn't this so pretty?  Functions are our FRIENDS :)
 
 
@@ -172,7 +170,7 @@ class Router(object):
 			time_added = elem[1]
 			arpcount = elem[3]
 			index = self.queue.index(elem)
-			if arpcount==5:
+			if arpcount==4:
 				self.queue.remove(elem)
 				continue
 				#timeout :(
