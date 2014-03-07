@@ -31,9 +31,9 @@ class Router(object):
 		fwd = []
 		my_intfs = []
 		for intf in self.net.interfaces(): #getting immediate neighbor info
-			my_intfs.append((intf.ipaddr, IPAddr('255.255.255.255'), IPAddr('0.0.0.0'), intf.name))
+			my_intfs.append((intf.ipaddr, IPAddr('255.255.255.255'), intf.ipaddr, intf.name))
 			neighborIP = IPAddr(intf.netmask.toUnsigned()&intf.ipaddr.toUnsigned())
-			fwd.append((neighborIP,intf.netmask, neighborIP, intf.name))
+			fwd.append((neighborIP,intf.netmask, IPAddr('0.0.0.0'), intf.name))
 		f = open('forwarding_table.txt', 'r') #getting not immediate neighbors from file
 		for line in f:
 			info = line.split(' ')
@@ -53,15 +53,15 @@ class Router(object):
 		self.macaddrs = {} #cache of {IP:addr} mappings to cut down ARP requests
 	def router_main(self):    
 		while True:
+			self.check_queue_times()
 			try:
 				dev,ts,pkt = self.net.recv_packet(timeout=1.0)
 			except SrpyNoPackets:
 				# log_debug("Timeout waiting for packets")
 				continue
 			except SrpyShutdown:
-				return          
+				return      
 			#part 2: forwarding packets and making ARP_request to obtain MAC address
-			#debugger()
 			if pkt.type == pkt.IP_TYPE: #!!!!if just a packet to be forwarded.  Not sure about this...
 				pkt = pkt.payload
 				destIP = pkt.dstip
@@ -69,82 +69,42 @@ class Router(object):
 				cidrlen = 0
 				for i in self.forwarding_table:
 					netmask = i[1]
-					#(IPAddr(str(self.forwarding_table[i][1]))).toUnsigned()
 					length = netmask_to_cidr(netmask)
-					#compare = int('1'*length + '0'*(32-length))
 					forwardIP = i[0]
-					nexthop = i[2]
+					nexthop = i[2] if i[2] != IPAddr('0.0.0.0') else destIP
 					ifname = i[3]
-					#print 'forward IP: ' + str(forwardIP) + ', Dest IP & mask: ' + str(IPAddr(destIP.toUnsigned() & netmask.toUnsigned()))
-					#print 'pkt.dstip: ' + str(pkt.dstip) + ', the prefix in question: ' + str(forwardIP)
 					if((forwardIP.toUnsigned() & netmask.toUnsigned()) == (destIP.toUnsigned() & netmask.toUnsigned())):
 						matches.append((length, destIP, nexthop, ifname))  #length, net_prefix, next hop, eth#
-
+				
 				if len(matches)!=0: #if we have at least one match 
-					print ' got into else statement to send request packet'
 					#finding MAC address -> SENDING ARP_REQUEST
 					low = 0
 					match = ()
-					debugger()
-					print 'obtained matches; which one to choose?'
 					for i in matches:
 						if(i[0]>low):
 							match = i
-					if match[2]==IPAddr('0.0.0.0'): #packet for us, drop it on the floor
+							low = i[0]
+					if match[2] in [str(x[2]) for x in self.my_intfs]: #packet for us, drop it on the floor
 						continue;
-					if match[1] not in self.macaddrs:
-						print 'do i not have the mac addr?'
-						#debugger()
+					if match[2] not in self.macaddrs:
+						debugger()
+						self.queue.append([match, floor(time()), pkt, 0])
 						self.send_arp_request(match)
-						self.queue.append((match, floor(time()), pkt, 0))
 					else:
-					    print 'or do i have the mac addr and can send the packet?'
 					    self.send_packet(match, pkt)
 						
 			#part 1: responding to ARP request
-			#debugger()
 			elif pkt.type == pkt.ARP_TYPE:
 				arp = pkt.payload
 				if (arp.opcode == pktlib.arp.REPLY): #if it is a reply to own request
-					timenow = floor(time())
 					for elem in self.queue:
-						pktdst = elem[0][1]
 						nexthop = elem[0][2]
-						ifname = elem[0][3]
-						time_added = elem[1]
 						ippkt = elem[2]
-						arpcount = elem[3]
-						if(arp.protosrc == pktdst): #we found our guy    ------------changed nexthop to pktdst
-							self.macaddrs[pktdst] = arp.hwsrc
+						if(arp.protosrc == nexthop): #we found our guy    ------------changed nexthop to pktdst
+							self.macaddrs[nexthop] = arp.hwsrc
 							self.queue.remove(elem)
 							self.send_packet(elem[0],ippkt)
-						if arpcount==4:
-							self.queue.remove(elem)
-							#timeout :(
-						if timenow-time_added-arpcount>=1: # if one or more seconds has elapsed since last sending an ARP request
-							self.send_arp_request(elem[0])
-							elem[3] = arpcount+1
 							
-							
-					'''
-					for arr in self.queue:
-						oldreq = arr[0]
-						if (oldreq.protodst == arp.protosrc): #if right element in queue
-							old_pkt = arr[1]
-							old_pkt.ttl = old_pkt.ttl - 1 #decrement TTL field
-							ether = pktlib.ethernet()
-							ether.type = ether.IP_TYPE
-							ether.src = old_pkt.
-							ether.dst = arp.hwsrc
-							ether.payload = old_pkt
-						   #pkt.protocol = pkt.UDP_PROTOCOL
-							self.net.send_packet(arr[2][3], ether)
-							break
-						else:								#if wrong element in queue, put back
-							self.queue.put(arr)
-						i = i+1;
-					print 'Did not find packet to respond to arp request.  :(\n'
-					'''
 				else:
 					for intf in self.net.interfaces(): #if request from someone else/ need reply
 						if (intf.ipaddr==arp_request.protodst):
@@ -173,7 +133,7 @@ class Router(object):
 	
 		arp_pkt = pktlib.arp()
 		arp_pkt.protosrc = intf.ipaddr #the ip address of the interface we're sending the request out
-		arp_pkt.protodst = destIP 
+		arp_pkt.protodst = nexthop 
 		arp_pkt.hwsrc = intf.ethaddr
 		arp_pkt.hwdst = ETHER_BROADCAST
 		arp_pkt.opcode = pktlib.arp.REQUEST
@@ -191,7 +151,6 @@ class Router(object):
 	#tup is a FT match tuple, like above
 	#tup = (prefixlength, destIP, nexthop, ifname)
 	def send_packet(self, tup, pkt):
-		print 'got here'
 		preflen = tup[0]
 		destIP = tup[1]
 		nexthop = tup[2]
@@ -202,11 +161,25 @@ class Router(object):
 		ether = pktlib.ethernet()
 		ether.type = ether.IP_TYPE
 		ether.src = intf.ethaddr
-		ether.dst = self.macaddrs[destIP]
+		ether.dst = self.macaddrs[nexthop]
 		ether.payload = pkt
-		print 'sending packet on its merry way'
 		self.net.send_packet(ifname, ether)
-		
+
+	def check_queue_times(self):
+		timenow = floor(time())
+		print self.queue
+		for elem in self.queue:
+			time_added = elem[1]
+			arpcount = elem[3]
+			index = self.queue.index(elem)
+			if arpcount==5:
+				self.queue.remove(elem)
+				continue
+				#timeout :(
+			if timenow-time_added>=1: # if one or more seconds has elapsed since last sending an ARP request
+				self.send_arp_request(elem[0])
+				self.queue[index][1] = timenow
+				self.queue[index][3] = arpcount+1
 
 def srpy_main(net):
 	'''
