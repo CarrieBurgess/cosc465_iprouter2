@@ -85,8 +85,7 @@ class Router(object):
 						self.queue.append([match, floor(time()), pkt, 0])
 						self.send_arp_request(match)
 					else:
-					    self.send_packet(match, pkt)
-						
+					    self.send_packet(match, pkt)		
 			#part 1: responding to ARP request
 			elif pkt.type == pkt.ARP_TYPE:
 				arp = pkt.payload
@@ -104,7 +103,7 @@ class Router(object):
 							arp_request = arp
 							arp = pktlib.arp()
 							arp.protodst = arp_request.protosrc
-							arp.protosrc = inf.ipaddr
+							arp.protosrc = intf.ipaddr
 							arp.hwsrc = intf.ethaddr
 							arp.hwdst = arp_request.hwsrc
 							arp.opcode = pktlib.arp.REPLY
